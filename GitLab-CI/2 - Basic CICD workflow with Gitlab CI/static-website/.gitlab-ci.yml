@@ -1,0 +1,57 @@
+#####################################
+#                                   #
+#  @author      : 00xWolf           #
+#    GitHub    : @mmsaeed509       #
+#    Developer : Mahmoud Mohamed   #
+#  﫥  Copyright : Exodia OS         #
+#                                   #
+#####################################
+
+# use node docker image for all jobs #
+image: node
+
+# define the stages #
+stages:
+  - build
+  - test
+  - deploy
+
+# the 1st Job Build the Website #
+build website:
+  # Select the stage #
+  stage: build
+
+  script:
+    - npm install
+    - npm install -g gatsby-cli
+    - gatsby build
+  artifacts:
+    paths:
+      - ./public
+
+# the 2nd Job Test the Artifacts #
+test artifacts:
+  # Select the stage #
+  stage: test
+  script:
+    - grep -q "Gatsby" ./public/index.html
+
+# the 2nd Job Test the Artifacts #
+test website:
+  # Select the stage #
+  stage: test
+
+  script:
+    - npm install
+    - npm install -g gatsby-cli
+    - gatsby serve &
+    - sleep 3
+    - curl "http://localhost:9000" | tac | tac | grep -q "Gatsby" ./public/index.html
+
+# the 4th Job Deploy tp surge #
+deploy tp surge:
+  # Select the stage #
+  stage: deploy
+  script:
+    - npm install -g surge
+    - surge --project ./public --domain 00xwolf.surge.sh

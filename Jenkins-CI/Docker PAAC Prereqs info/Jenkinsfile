@@ -1,0 +1,237 @@
+///////////////////////////////////////
+//                                   //
+//  @author      : 00xWolf           //
+//    GitHub    : @mmsaeed509       //
+//    Developer : Mahmoud Mohamed   //
+//  﫥  Copyright : Exodia OS         //
+//                                   //
+///////////////////////////////////////
+
+
+// -------------- Colors For Build Status -------------- //
+def COLOR_STATUS = [
+
+    'SUCCESS': 'good', 
+    'FAILURE': 'danger',
+
+]
+
+pipeline {
+
+    // -------------- Agent -------------- //
+    agent any
+
+    // -------------- Needed Tools -------------- //
+    tools {
+
+        maven "MAVEN3"
+        jdk "OracleJDK8"
+
+    }
+
+    environment {
+
+        registryCredential = 'ecr:us-east-1:aws'
+        appRegistry = "143480833705.dkr.ecr.us-east-1.amazonaws.com/vprofileappimg"
+        vprofileRegistry = "https://143480833705.dkr.ecr.us-east-1.amazonaws.com"
+        cluster = "vprofile"
+        service = "vprofileappsvc"
+
+    }
+
+
+    // -------------- Stages -------------- //
+    stages {
+
+        // -------------- Fetch Code Stage -------------- //
+        stage('Fetch Code') {
+
+
+            // -------------- Fetch Code Stage Steps -------------- //
+            steps {
+
+                git branch: 'docker', url: 'https://github.com/devopshydclub/vprofile-project.git'
+
+            }
+
+
+        }
+
+
+        // -------------- UNIT TESTS Stage -------------- //
+        stage('UNIT TESTS') {
+
+
+            // -------------- UNIT TESTS Stage Steps -------------- //
+            steps {
+
+                sh 'mvn test'
+
+            }
+
+
+        }
+
+
+        // -------------- Code Analysis (Checkstyle) Stage -------------- //
+        stage('Checkstyle Code Analysis') {
+
+
+            // -------------- Checkstyle Code Analysis Stage Steps -------------- //
+            steps {
+
+                sh 'mvn checkstyle:checkstyle'
+
+            }
+            post {
+
+                success {
+
+                    echo 'Generated Analysis Result'
+
+                }
+                
+            }
+
+
+        }
+
+
+        // -------------- Sonar Analysis Stage -------------- //
+        stage('Sonar Analysis') {
+
+
+            // -------------- Sonar Analysis Stage Environment -------------- //
+            environment {
+
+                scannerHome = tool 'sonar4.7'
+
+            }
+
+            // -------------- Sonar Analysis Stage Steps -------------- //
+            steps {
+
+               withSonarQubeEnv('sonar') {
+
+                   sh '''
+
+                   ${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=vprofile \
+                   -Dsonar.projectName=vprofile \
+                   -Dsonar.projectVersion=1.0 \
+                   -Dsonar.sources=src/ \
+                   -Dsonar.java.binaries=target/test-classes/com/visualpathit/account/controllerTest/ \
+                   -Dsonar.junit.reportsPath=target/surefire-reports/ \
+                   -Dsonar.jacoco.reportsPath=target/jacoco.exec \
+                   -Dsonar.java.checkstyle.reportPaths=target/checkstyle-result.xml
+                   
+                   '''
+              
+              }
+
+            }
+
+        
+        }
+
+
+        // -------------- Quality Gate Stage -------------- //
+        stage("Quality Gate") {
+
+
+            // -------------- Quality Gate Stage Steps -------------- //
+            steps {
+
+                timeout(time: 1, unit: 'HOURS') {
+
+                    // Parameter indicates whether to set pipeline to UNSTABLE if Quality Gate fails
+                    // true = set pipeline to UNSTABLE, false = don't
+                    waitForQualityGate abortPipeline: true
+
+                }
+
+            }
+
+        }
+
+
+        // -------------- Build App Docker Image Stage -------------- //
+        stage("Build App Docker Image") {
+
+
+            // -------------- Build App Docker Image Stage Steps -------------- //
+            steps {
+
+                script {
+
+                    dockerImage = docker.build( appRegistry + ":$BUILD_NUMBER", "./Docker-files/app/multistage/")
+                    
+                }
+
+            }
+
+        }
+
+
+        // -------------- Upload App Docker Image To ECR Stage -------------- //
+        stage("Upload App Docker Image"){
+
+
+            // -------------- Upload App Docker Image To ECR Stage Steps -------------- //
+            steps{
+
+                script {
+
+                    docker.withRegistry( vprofileRegistry, registryCredential )
+                    dockerImage.push("$BUILD_NUMBER")
+                    dockerImage.push('latest')
+
+                }
+
+            
+            }
+            
+
+        }
+
+
+        // -------------- Deploy to ECS Stage -------------- //
+        stage('Deploy to ECS') {
+
+
+            // -------------- Deploy to ECS Stage Steps -------------- //
+          steps {
+
+            withAWS(credentials: 'aws', region: 'us-east-1') {
+                
+                sh 'aws ecs update-service --cluster ${cluster} --service ${service} --force-new-deployment'
+                
+                }
+
+          }
+
+
+     }
+
+
+
+    }
+
+
+    // -------------- Send Notifications -------------- //
+    post {
+
+
+        always {
+
+            echo 'Slack Notifications.'
+            slackSend channel: '#jenkins-ci-cd',
+                color: COLOR_STATUS[currentBuild.currentResult],
+                message: "*${currentBuild.currentResult}:* Job ${env.JOB_NAME} build ${env.BUILD_NUMBER} \n More info at: ${env.BUILD_URL}"
+
+        }
+
+
+    }
+
+
+}
